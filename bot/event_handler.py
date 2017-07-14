@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -16,47 +17,72 @@ class RtmEventHandler(object):
             self._handle_by_type(event['type'], event)
 
     def _handle_by_type(self, event_type, event):
-        # See https://api.slack.com/rtm for a full list of events
-        if event_type == 'error':
-            # error
-            self.msg_writer.write_error(event['channel'], json.dumps(event))
-        elif event_type == 'message':
+        if event_type == 'message':
             # message was sent to channel
             self._handle_message(event)
-        elif event_type == 'channel_joined':
-            # you joined a channel
-            self.msg_writer.write_help_message(event['channel'])
-        elif event_type == 'group_joined':
-            # you joined a private group
-            self.msg_writer.write_help_message(event['channel'])
-        else:
-            pass
 
     def _handle_message(self, event):
-        # Filter out messages from the bot itself, and from non-users (eg. webhooks)
-        if ('user' in event) and (not self.clients.is_message_from_me(event['user'])):
+        # Filter out messages from the bot itself
+        #msg_txt = event['text']
+        #logging.info("message: {}".format(msg_txt))
+        #logging.info("user: {}".format(event))
 
-            msg_txt = event['text']
+        if 'text' in event and 'Zahltag' in event['text']:
+            self.tell_the_stats(event)
 
-            if self.clients.is_bot_mention(msg_txt) or self._is_direct_message(event['channel']):
-                # e.g. user typed: "@pybot tell me a joke!"
-                if 'help' in msg_txt:
-                    self.msg_writer.write_help_message(event['channel'])
-                elif re.search('hi|hey|hello|howdy', msg_txt):
-                    self.msg_writer.write_greeting(event['channel'], event['user'])
-                elif 'joke' in msg_txt:
-                    self.msg_writer.write_joke(event['channel'])
-                elif 'attachment' in msg_txt:
-                    self.msg_writer.demo_attachment(event['channel'])
-                elif 'echo' in msg_txt:
-                    self.msg_writer.send_message(event['channel'], msg_txt)
-                else:
-                    self.msg_writer.write_prompt(event['channel'])
+        if 'username' not in event and 'build-bot' not in event['username']:
+            return
+            
+        if self.clients.is_message_from_me(event['user']) is True:
+            # Message from the bot himself
+            return 
 
-    def _is_direct_message(self, channel):
-        """Check if channel is a direct message channel
+        msg_txt = event['text']
 
-        Args:
-            channel (str): Channel in which a message was received
-        """
-        return channel.startswith('D')
+        failed = self.pipeline_has_failed(event, msg_txt)
+
+        if failed is False:
+            return
+
+        self.msg_writer.send_message(event['channel'], "Oh boy, one more beer for the list!")
+
+    def pipeline_has_failed(self, event, message):
+
+        regex = "(Pipeline)\s(#[0-9]+)\s(of)\s(branch)\s([A-Za-z0-9-_]+)\s(by)\s([A-Za-z\s]+)\s(failed)"
+    
+        m = re.search(regex, message)
+
+        if m is None:
+            return False
+
+
+        logging.info("Pipeline has failed")
+        name = m.group(7)
+
+        self.increaseBeerCounterFor(event, name)
+
+        return True
+
+    def tell_the_stats(self, event):
+
+        url = "http://galaxis.rwth-aachen.de/__beercounter/__beercounter.php?action=get"
+        r = requests.get(url)
+
+        if r.status_code != 200:
+            logging.error("Something went wrong")
+            return 
+
+        beer_counter = json.loads(r.content)
+        
+        for entry in beer_counter:
+            msg_txt = "{} = {} beers".format(entry["name"], entry["beers"])
+            self.msg_writer.send_message(event['channel'], msg_txt)
+
+    def increaseBeerCounterFor(self, event, name):
+        logging.info("Increase for: {}".format(name))
+        url = "http://galaxis.rwth-aachen.de/__beercounter/__beercounter.php"
+        r = requests.post(url, data={'action': 'add', 'name': name})
+
+        logging.info("{} {}".format(r.status_code, r.reason))
+
+        self.tell_the_stats(event)
