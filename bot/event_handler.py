@@ -30,7 +30,7 @@ class RtmEventHandler(object):
         if 'text' in event and 'Zahltag' in event['text']:
             self.tell_the_stats(event)
 
-        if 'username' not in event and 'build-bot' not in event['username']:
+        if 'username' not in event or 'build-bot' not in event['username']:
             return
             
         if self.clients.is_message_from_me(event['user']) is True:
