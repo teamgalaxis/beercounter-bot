@@ -33,7 +33,7 @@ class RtmEventHandler(object):
         if 'username' not in event or 'build-bot' not in event['username']:
             return
             
-        if self.clients.is_message_from_me(event['user']) is True:
+        if 'user' in event and self.clients.is_message_from_me(event['user']) is True:
             # Message from the bot himself
             return 
 
